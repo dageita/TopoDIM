@@ -1,0 +1,88 @@
+# ============================================================================
+# TopoDIM .gitignore
+# ============================================================================
+
+# --- Local SentenceTransformer model (large, ~700MB, downloaded at runtime)
+# 此目录由 profile_embedding.py 在本地加载，不应入库。
+/local/
+
+# --- Secrets / environment ---------------------------------------------------
+# .env contains real API keys/tokens — NEVER commit it.
+.env
+*.env
+*.env.local
+
+# --- Python artifacts ---------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# --- Virtual environments -----------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+.venv*
+
+# --- Type / test / lint caches -----------------------------------------------
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.cache/
+
+# --- Jupyter ------------------------------------------------------------------
+.ipynb_checkpoints/
+
+# --- Model / training / output artifacts --------------------------------------
+# R-GCN checkpoints produced by experiments/train_*.py
+/checkpoints/
+# Evaluation result dumps from run_*.py
+/result/
+# Any *.pt / *.ckpt model weights
+*.pt
+*.ckpt
+*.bin
+
+# --- Datasets (large, often mounted or downloaded) ----------------------------
+# datasets_ is large and typically prepared locally; uncomment to ignore:
+# datasets_/
+
+# --- IDE / OS -----------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- HuggingFace / torch caches (if accidentally created in-repo) ------------
+.hf_cache/
+wandb/
+runs/
+
+# --- Logs ---------------------------------------------------------------------
+*.log
+log/

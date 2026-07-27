@@ -187,11 +187,10 @@ def get_kwargs(mode:Union[Literal['DirectAnswer'],Literal['FullConnected'],Liter
         fixed_spatial_masks = generate_star_graph(N)
         fixed_temporal_masks = [[1 for i in range(N)] for j in range(N)]
     elif mode == 'hetero':
-        node_kwargs = [ {"llm_name": "gpt-oss:20b"},
-                        {"llm_name": "gpt-oss:120b"}, 
-                        {"llm_name": "gpt-oss:20b"}, 
-                        {"llm_name": "gpt-oss:120b"},
-                        {"llm_name": "gpt-oss:20b"}]
+        # Per-node model names fall back to args.llm_name in graph.py when
+        # not specified here. Leave empty so a single --llm_name (e.g. an
+        # SGLang-hosted model) drives every node.
+        node_kwargs = [ {} for _ in range(N) ]
 
 
     if 'Fake' in mode and 'AG' not in mode:

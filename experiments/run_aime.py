@@ -270,11 +270,9 @@ def get_kwargs(mode:Union[Literal['DirectAnswer'],Literal['FullConnected'],Liter
         fixed_spatial_masks = generate_star_graph(N)
         fixed_temporal_masks = [[1 for i in range(N)] for j in range(N)]
     elif mode == 'hetero':
-        node_kwargs = [ {"llm_name": "gemma3:12b"},
-                        {"llm_name": "gpt-oss:20b"}, 
-                        {"llm_name": "gemma3:12b"}, 
-                        {"llm_name": "gpt-oss:20b"},
-                        {"llm_name": "gemma3:12b"}]  
+        # Per-node model names fall back to args.llm_name in graph.py when
+        # not specified here. Leave empty so a single --llm_name drives every node.
+        node_kwargs = [ {} for _ in range(N) ]
     return {"initial_spatial_probability": initial_spatial_probability,
             "fixed_spatial_masks": fixed_spatial_masks,
             "initial_temporal_probability": initial_temporal_probability,

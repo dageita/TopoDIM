@@ -26,14 +26,29 @@ semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 RPM_LIMIT = 10
 rate_limiter = AsyncLimiter(RPM_LIMIT, time_period=60)
 
-aclient = AsyncOpenAI(api_key=MINE_API_KEYS, base_url=MINE_BASE_URL)
+# Lazily constructed so importing this module does NOT fail when the
+# OpenAI-compatible backend is unconfigured (e.g. when using the SGLang
+# backend instead). The client is only built the first time it is used.
+aclient = None
+
+def _get_client():
+    global aclient
+    if aclient is None:
+        if not MINE_API_KEYS:
+            raise RuntimeError(
+                "DeepseekChat/OpenAI backend is not configured: set "
+                "API_KEY (and BASE_URL) in the environment, or switch to "
+                "the SGLang backend via --llm_name sglang-..."
+            )
+        aclient = AsyncOpenAI(api_key=MINE_API_KEYS, base_url=MINE_BASE_URL)
+    return aclient
 
 @retry(reraise=True, stop=stop_after_attempt(8), wait=wait_exponential_jitter(exp_base=2, max=8))
 async def achat_deepseek(model: str, msg: List[Dict],):
     async with rate_limiter:
         try:
             async with async_timeout.timeout(1000):
-                completion = await aclient.chat.completions.create(model=model,messages=msg)
+                completion = await _get_client().chat.completions.create(model=model,messages=msg)
             response_message = completion.choices[0].message.content
             
             if isinstance(response_message, str):

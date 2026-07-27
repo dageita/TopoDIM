@@ -1,0 +1,17 @@
+.git
+.gitignore
+__pycache__
+**/__pycache__
+*.py[cod]
+*.egg-info
+.venv
+venv
+.env
+*.md
+.DS_Store
+.idea
+.vscode
+*.log
+checkpoints
+outputs
+wandb

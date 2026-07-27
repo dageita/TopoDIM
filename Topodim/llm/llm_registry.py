@@ -25,6 +25,9 @@ class LLMRegistry:
         elif 'deepseek' in model_name:
             model = cls.registry.get('deepseek', model_name)
 
+        elif 'sglang' in model_name.lower():
+            model = cls.registry.get('SGLangChat', model_name)
+
         elif 'qwen' in model_name.lower():
             model = cls.registry.get('QwenLocalChat', model_name)
             
