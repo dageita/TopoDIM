@@ -4,6 +4,7 @@ from Topodim.llm.gemini_chat import GeminiChat
 from Topodim.llm.qwen_local_chat import QwenLocalChat
 from Topodim.llm.deepseek_chat import DeepseekChat
 from Topodim.llm.sglang_chat import SGLangChat
+from Topodim.llm.claude_code_chat import ClaudeCodeChat
 
 __all__ = ["LLMRegistry",
            "GPTChat",
@@ -11,5 +12,6 @@ __all__ = ["LLMRegistry",
            "QwenLocalChat",
            "DeepseekChat",
            "SGLangChat",
+           "ClaudeCodeChat",
            "deepseek"
            ]

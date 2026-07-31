@@ -25,6 +25,12 @@ requests==2.32.3
 openai==1.46.0
 anthropic==0.119.0
 tiktoken==0.7.0
+# Claude Agent SDK: lets a topology node run as a real Claude Code agent
+# session (tools, multi-turn). Shells out to the `claude` CLI, which the
+# Dockerfile installs via npm (@anthropic-ai/claude-code).
+# Pinned: the backend code (claude_code_chat.py) relies on this version's
+# message classes (ResultMessage/AssistantMessage/TextBlock via isinstance).
+claude-agent-sdk==0.2.128
 
 # --- ML / NLP (torch is installed by the Dockerfile) ---
 transformers==4.44.2
@@ -42,7 +48,9 @@ pandas==1.5.3
 PyYAML==6.0.1
 tqdm==4.66.5
 tenacity==8.5.0
-pydantic==2.9.2
+# pydantic is ranged (not pinned) because claude-agent-sdk -> mcp requires
+# pydantic>=2.11.0; TopoDIM only uses pydantic.BaseModel in tools/web/screenshot.py.
+pydantic>=2.11.0,<3.0.0
 class-registry==2.1.2
 python-dotenv==1.0.0
 shortuuid==1.0.11

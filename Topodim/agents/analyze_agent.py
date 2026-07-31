@@ -6,6 +6,8 @@ from Topodim.agents.agent_registry import AgentRegistry
 from Topodim.llm.llm_registry import LLMRegistry
 from Topodim.prompt.prompt_set_registry import PromptSetRegistry
 from Topodim.tools.search.wiki import search_wiki_main
+from Topodim.utils.efficiency_metrics import set_pending_peer_chars
+
 
 def find_strings_between_pluses(text):
     return re.findall(r'\@(.*?)\@', text)
@@ -46,6 +48,12 @@ class AnalyzeAgent(Node):
             debate_str += f"Agent {id}, role is {info['role']}, output is:\n\n {info['output']}\n\n"
         for id, info in evaluation_info.items():
             evaluation_str += f"Agent {id}, role is {info['role']}, output is:\n\n {info['output']}\n\n"
+
+        peer_chars = (
+            len(spatial_str) + len(temporal_str) + len(query_str)
+            + len(debate_str) + len(evaluation_str)
+        )
+        set_pending_peer_chars(peer_chars)
 
         user_prompt += (
             "\nPeers evaluated your answers. You can refer to their response critically and determine the correct option of the task:\n\n"

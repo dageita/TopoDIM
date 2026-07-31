@@ -4,12 +4,14 @@ from abc import ABC
 import numpy as np
 import torch
 import asyncio
+import time
 
 from Topodim.graph.node import Node
 from Topodim.agents.agent_registry import AgentRegistry
 from Topodim.prompt.prompt_set_registry import PromptSetRegistry
 from Topodim.llm.profile_embedding import get_sentence_embedding
 from Topodim.gnn.rgcn import GraphGenerationPolicy
+from Topodim.utils.efficiency_metrics import QuestionMetrics
 from torch_geometric.utils import dense_to_sparse
 
 class Graph(ABC):
@@ -52,6 +54,11 @@ class Graph(ABC):
             fixed_spatial_masks = [[1 if i!=j else 0 for j in range(len(agent_names))] for i in range(len(agent_names))]
         if fixed_temporal_masks is None:
             fixed_temporal_masks = [[1 for j in range(len(agent_names))] for i in range(len(agent_names))]
+        # Keep 2-D copy for fixed-topology eval (B1/B2); flat tensors for legacy path.
+        self.fixed_spatial_mask_matrix = torch.tensor(fixed_spatial_masks, dtype=torch.float32)
+        if self.fixed_spatial_mask_matrix.dim() == 1:
+            n = len(agent_names)
+            self.fixed_spatial_mask_matrix = self.fixed_spatial_mask_matrix.view(n, n)
         fixed_spatial_masks = torch.tensor(fixed_spatial_masks).view(-1)
         fixed_temporal_masks = torch.tensor(fixed_temporal_masks).view(-1)
         assert len(fixed_spatial_masks)==len(agent_names)*len(agent_names),"The fixed_spatial_masks doesn't match the number of agents"
@@ -63,6 +70,7 @@ class Graph(ABC):
         self.agent_names:List[str] = agent_names
         self.optimized_spatial = optimized_spatial
         self.optimized_temporal = optimized_temporal
+        self.use_fixed_topology = False  # set True via CLI --fixed_topology for B1/B2
         self.decision_node:Node = AgentRegistry.get(decision_method, **{"domain":self.domain,"llm_name":self.llm_name})
         self.nodes:Dict[str,Node] = {}
         self.potential_spatial_edges:List[List[str, str]] = []
@@ -346,6 +354,10 @@ class Graph(ABC):
             task_query = input.get('task', '') 
             if not task_query:
                 raise ValueError("Input dictionary must contain a 'task' key with the query string.")
+
+            qm = QuestionMetrics(question_preview=task_query[:160])
+            qm.begin()
+            self.efficiency_metrics = qm
             
             task_embedding = torch.tensor(get_sentence_embedding(task_query))
 
@@ -369,9 +381,42 @@ class Graph(ABC):
                 sorted_node_ids = sorted(self.nodes.keys())
                 id_to_idx = {node_id: i for i, node_id in enumerate(sorted_node_ids)}
 
-                adj_matrices, total_log_prob_edges, diversity_score, avg_entropy = self.rgcn(
-                    task_embedding, self.role_adj_matrix, self.role_relation, temperature=temperature
-                )
+                if getattr(self, "use_fixed_topology", False):
+                    # B1/B2: honor mode masks; skip RGCN sampling/pruning.
+                    n = len(sorted_node_ids)
+                    mask = self.fixed_spatial_mask_matrix
+                    if mask.shape[0] != n:
+                        raise ValueError(
+                            f"fixed_spatial_mask_matrix shape {tuple(mask.shape)} "
+                            f"!= num nodes {n}"
+                        )
+                    spatial = torch.zeros(n, n)
+                    # Add edges in row-major order; skip any that would create a cycle
+                    # (FullConnected → transitive DAG; Chain/Star keep their shape).
+                    for i in range(n):
+                        for j in range(n):
+                            if i == j or mask[i, j].item() <= 0:
+                                continue
+                            out_node = self.nodes[sorted_node_ids[i]]
+                            in_node = self.nodes[sorted_node_ids[j]]
+                            # Tentatively check against already-accepted spatial edges.
+                            if self.check_cycle(in_node, {out_node}):
+                                continue
+                            # check_cycle walks existing spatial_successors; add after check.
+                            spatial[i, j] = 1.0
+                            out_node.add_successor(in_node, "spatial")
+                    # Clear the tentative successors; they are re-added below uniformly.
+                    self.clear_spatial_connection()
+                    query = torch.zeros(n, n)
+                    debate = torch.zeros(n, n)
+                    adj_matrices = torch.stack([spatial, query, debate], dim=0)
+                    total_log_prob_edges = torch.tensor(0.0)
+                    diversity_score = torch.tensor(0.0)
+                    avg_entropy = torch.tensor(0.0)
+                else:
+                    adj_matrices, total_log_prob_edges, diversity_score, avg_entropy = self.rgcn(
+                        task_embedding, self.role_adj_matrix, self.role_relation, temperature=temperature
+                    )
                 log_probs += total_log_prob_edges
                 total_diversity_score += diversity_score
                 total_entropy += avg_entropy 
@@ -392,6 +437,10 @@ class Graph(ABC):
                     active_nodes_mask |= (has_outgoing | has_incoming)
 
                 active_node_indices = torch.where(active_nodes_mask)[0].tolist()
+                # DirectAnswer / single-agent graphs have no edges, so every node
+                # looks "inactive". Keep all nodes so the solitary agent still runs.
+                if len(active_node_indices) == 0:
+                    active_node_indices = list(range(self.num_nodes))
                 if len(active_node_indices) < self.num_nodes:
 
                     sorted_node_ids = [sorted_node_ids[i] for i in active_node_indices]
@@ -403,6 +452,11 @@ class Graph(ABC):
 
                 forward_adj_matrix = (adj_matrices[0] + adj_matrices[2]) > 0.5 
                 num_active_nodes = len(sorted_node_ids)
+                qm.active_agents = num_active_nodes
+                qm.spatial_edges = int((adj_matrices[0] > 0.5).sum().item())
+                qm.query_edges = int((adj_matrices[1] > 0.5).sum().item())
+                qm.debate_edges = int((adj_matrices[2] > 0.5).sum().item())
+
                 for i in range(num_active_nodes):
                     for j in range(num_active_nodes):
                         if forward_adj_matrix[i, j]:
@@ -463,7 +517,14 @@ class Graph(ABC):
                 self.update_memory()
 
             self.connect_decision_node()
+            decision_t0 = time.perf_counter()
+            calls_before = len(qm.llm_calls)
             await self.decision_node.async_execute(input)
+            qm.decision_e2e_s = time.perf_counter() - decision_t0
+            for call in qm.llm_calls[calls_before:]:
+                call.is_decision = True
+                call.role = "Decision"
+                call.node_id = getattr(self.decision_node, "id", "decision")
             final_answers = self.decision_node.outputs
             
             if len(final_answers) == 0:
@@ -471,6 +532,8 @@ class Graph(ABC):
 
             self.execution_info['final_answer'] = final_answers[0] if final_answers else None
             self.execution_info['question'] = task_query
+            qm.topo_summary = self.get_execution_summary()
+            qm.end()
 
             avg_diversity_score = total_diversity_score / num_rounds
             avg_entropy_score = total_entropy / num_rounds
@@ -479,15 +542,22 @@ class Graph(ABC):
 
     async def _execute_node_with_retry(self, node: Node, input: Dict[str, str], max_tries: int, max_time: int, mode: int = 0, pre_node: any = None):
         tries = 0
+        qm = getattr(self, "efficiency_metrics", None)
         while tries < max_tries:
             try:
+                calls_before = len(qm.llm_calls) if qm is not None else 0
                 if pre_node is None:
                     await asyncio.wait_for(node.async_execute(input, mode), timeout=max_time)
                 else:
                     await asyncio.wait_for(node.async_execute(input, mode, pre_node=pre_node), timeout=max_time)
+                if qm is not None:
+                    for call in qm.llm_calls[calls_before:]:
+                        call.role = getattr(node, "role", "") or ""
+                        call.node_id = getattr(node, "id", "") or ""
+                        call.mode = mode
                 break
             except Exception as e:
-                print(f"Error during execution of node {node.id} (try {tries+1}/{max_tries}): {e}")
+                print(f"Error during execution of node {node.id} (try {tries+1}/{max_tries}): {type(e).__name__}: {e}")
                 tries += 1
                 if tries == max_tries:
                     print(f"Failed to execute node {node.id} after {max_tries} attempts.")

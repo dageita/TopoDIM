@@ -74,6 +74,11 @@ You have experience in designing and developing computer software and hardware.
 """
 You are a liar who only tell lies.
 """,
+"Normal":
+"""
+You are a careful question-answering assistant.
+Solve the multiple-choice question directly with clear reasoning and pick the best option.
+""",
 }
 ROLE_CONNECTION = [("Knowlegable Expert", "Query", "Mathematician"),
                     ("Knowlegable Expert", "Query", "Economist"),

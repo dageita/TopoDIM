@@ -5,6 +5,7 @@ from Topodim.agents.agent_registry import AgentRegistry
 from Topodim.llm.llm_registry import LLMRegistry
 from Topodim.prompt.prompt_set_registry import PromptSetRegistry
 from Topodim.tools.coding.python_executor import PyExecutor
+from Topodim.utils.efficiency_metrics import set_pending_peer_chars
 
 @AgentRegistry.register('FinalWriteCode')
 class FinalWriteCode(Node):
@@ -89,6 +90,7 @@ class FinalRefer(Node):
         spatial_str = ""
         for id, info in spatial_info.items():
             spatial_str += id + ": " + info['output'] + "\n\n"
+        set_pending_peer_chars(len(spatial_str))
         decision_few_shot = self.prompt_set.get_decision_few_shot()
         user_prompt = f"{decision_few_shot} The task is:\n\n {raw_inputs['task']}.\n At the same time, the output of other agents is as follows:\n\n{spatial_str}"
         return system_prompt, user_prompt

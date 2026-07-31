@@ -28,6 +28,9 @@ class LLMRegistry:
         elif 'sglang' in model_name.lower():
             model = cls.registry.get('SGLangChat', model_name)
 
+        elif 'claude' in model_name.lower():
+            model = cls.registry.get('ClaudeCodeChat', model_name)
+
         elif 'qwen' in model_name.lower():
             model = cls.registry.get('QwenLocalChat', model_name)
             

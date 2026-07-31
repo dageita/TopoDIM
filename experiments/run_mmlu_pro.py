@@ -6,6 +6,7 @@ import asyncio
 from typing import Union, Literal, List
 import argparse
 import random
+import torch
 
 from Topodim.graph.graph import Graph
 from datasets_.mmlu_pro_dataset import MMLUProDataset 
@@ -47,6 +48,22 @@ def parse_args():
                         help="the decision method of the final node")
     parser.add_argument('--optimized_spatial',action='store_true')
     parser.add_argument('--optimized_temporal',action='store_true')
+    parser.add_argument('--fixed_topology', action='store_true',
+                        help="Use mode's fixed spatial masks instead of RGCN "
+                             "(required for B1 FullConnected / B2 Chain baselines).")
+    parser.add_argument('--load_checkpoint', type=str, default="",
+                        help="Path to a saved RGCN checkpoint (e.g. checkpoints/rgcn_best.pt). "
+                             "Loaded before optional training and evaluation.")
+    parser.add_argument('--limit_questions', type=int, default=153,
+                        help="Number of test questions used for evaluation. Default 153.")
+    parser.add_argument('--condition', type=str, default="",
+                        help="Experiment condition label for metrics (e.g. B0, B1, B4).")
+    parser.add_argument('--metrics_out', type=str, default="",
+                        help="Path to write efficiency metrics JSON "
+                             "(default: result/metrics_<condition|mode>.json).")
+    parser.add_argument('--baseline_metrics', nargs='*', default=[],
+                        help="Baseline metrics for success criteria, as NAME=PATH pairs "
+                             "(e.g. B1=result/metrics_B1.json B3=result/metrics_B3.json).")
 
     parser.add_argument('--diversity_weight', type=float, default=0.8,
                         help='Weight for diversity regularization (0.3-0.8 recommended, independent from policy gradient)')
@@ -73,13 +90,16 @@ async def main():
     PromptTokens.instance().reset()
     CompletionTokens.instance().reset()
     Cost.instance().reset()
+
+    result_path = Topodim_ROOT / "result"
+    os.makedirs(result_path, exist_ok=True)
     
     mode = args.mode
     decision_method = args.decision_method
     agent_names = [name for name,num in zip(args.agent_names,args.agent_nums) for _ in range(num)]
     kwargs = get_kwargs(mode,len(agent_names))
-    limit_questions = 153
-    
+    limit_questions = args.limit_questions
+
     graph = Graph(domain=args.domain,
                   llm_name=args.llm_name,
                   agent_names=agent_names,
@@ -87,6 +107,17 @@ async def main():
                   optimized_spatial=args.optimized_spatial,
                   optimized_temporal=args.optimized_temporal,
                   **kwargs)
+    graph.use_fixed_topology = bool(args.fixed_topology)
+    if graph.use_fixed_topology:
+        print(f"Using FIXED topology from mode={mode} "
+              f"(mask shape={tuple(graph.fixed_spatial_mask_matrix.shape)})")
+
+    if args.load_checkpoint:
+        checkpoint = torch.load(args.load_checkpoint, map_location="cpu")
+        graph.rgcn.load_state_dict(checkpoint["model_state_dict"])
+        print(f"Loaded RGCN checkpoint from {args.load_checkpoint} "
+              f"(trained {checkpoint.get('num_iters')} iters, "
+              f"final_utility={checkpoint.get('final_utility')})")
     # download()
     dataset_train = MMLUProDataset('val') 
     dataset_val = MMLUProDataset('test')
@@ -105,11 +136,32 @@ async def main():
             init_temperature=args.init_temperature,
             final_temperature=args.final_temperature,
         )
-        
-        
-    
-    score = await evaluate(graph=graph,dataset=dataset_val,num_rounds=args.num_rounds,limit_questions=limit_questions,eval_batch_size=args.batch_size)
+
+    condition = args.condition or args.mode
+    metrics_out = args.metrics_out
+    if not metrics_out:
+        metrics_out = str(result_path / f"metrics_{condition}.json")
+
+    baseline_metrics = {}
+    for item in args.baseline_metrics:
+        if "=" not in item:
+            raise SystemExit(f"--baseline_metrics entries must be NAME=PATH, got: {item}")
+        name, path = item.split("=", 1)
+        baseline_metrics[name.strip()] = path.strip()
+
+    score, efficiency_summary = await evaluate(
+        graph=graph,
+        dataset=dataset_val,
+        num_rounds=args.num_rounds,
+        limit_questions=limit_questions,
+        eval_batch_size=args.batch_size,
+        condition=condition,
+        metrics_out=metrics_out,
+        baseline_metrics=baseline_metrics or None,
+    )
     print(f"Score: {score}")
+    print(f"Condition: {condition}")
+    print(f"Efficiency metrics: {metrics_out}")
 
     print("\n" + "="*60)
     print("Token Usage Summary:")
